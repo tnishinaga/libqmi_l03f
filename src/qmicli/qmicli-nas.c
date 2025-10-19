@@ -72,6 +72,7 @@ static gboolean get_supported_messages_flag;
 static gboolean swi_get_status_flag;
 static gboolean reset_flag;
 static gboolean noop_flag;
+static gboolean attach_flag;
 
 static GOptionEntry entries[] = {
 #if defined HAVE_QMI_MESSAGE_NAS_GET_SIGNAL_STRENGTH
@@ -216,6 +217,10 @@ static GOptionEntry entries[] = {
       "Just allocate or release a NAS client. Use with `--client-no-release-cid' and/or `--client-cid'",
       NULL
     },
+    { "nas-attach", 0, 0, G_OPTION_ARG_NONE, &attach_flag,
+      "issue attach command",
+      NULL
+    },
     { NULL, 0, 0, 0, NULL, NULL, NULL }
 };
 
@@ -266,7 +271,9 @@ qmicli_nas_options_enabled (void)
                  get_supported_messages_flag +
                  swi_get_status_flag +
                  reset_flag +
-                 noop_flag);
+                 noop_flag +
+                 attach_flag
+                );
 
     if (n_actions > 1) {
         g_printerr ("error: too many NAS actions requested\n");
@@ -695,6 +702,58 @@ get_signal_strength_ready (QmiClientNas *client,
 }
 
 #endif /* HAVE_QMI_MESSAGE_NAS_GET_SIGNAL_STRENGTH */
+
+static QmiMessageNasAttachDetachInput *
+nas_attach_detach_input_create (void)
+{
+    GError *error = NULL;
+    QmiMessageNasAttachDetachInput *input;
+
+    input = qmi_message_nas_attach_detach_input_new ();
+    if (!qmi_message_nas_attach_detach_input_set_action  (
+            input,
+            0x01,
+            &error)) {
+        g_printerr ("error: couldn't create input data bundle: '%s'\n",
+                    error->message);
+        g_error_free (error);
+        qmi_message_nas_attach_detach_input_unref (input);
+        input = NULL;
+    }
+
+    return input;
+}
+
+static void
+nas_attach_detach_ready (QmiClientNas *client,
+             GAsyncResult *res)
+{
+    QmiMessageNasAttachDetachOutput *output;
+    GError *error = NULL;
+
+    output = qmi_client_nas_attach_detach_finish (client, res, &error);
+    if (!output) {
+        g_printerr ("error: operation failed: %s\n", error->message);
+        g_error_free (error);
+        operation_shutdown (FALSE);
+        return;
+    }
+
+    if (!qmi_message_nas_attach_detach_output_get_result (output, &error)) {
+        g_printerr ("error: couldn't message ID 0x0023: %s\n", error->message);
+        g_error_free (error);
+        qmi_message_nas_attach_detach_output_unref (output);
+        operation_shutdown (FALSE);
+        return;
+    }
+
+    g_print ("[%s] Successfully message ID 0x0023\n",
+             qmi_device_get_path_display (ctx->device));
+
+    qmi_message_nas_attach_detach_output_unref (output);
+    operation_shutdown (TRUE);
+}
+
 
 #if defined HAVE_QMI_MESSAGE_NAS_GET_TX_RX_INFO
 
@@ -4913,6 +4972,27 @@ qmicli_nas_run (QmiDevice *device,
         return;
     }
 #endif
+
+    if (attach_flag) {
+        QmiMessageNasAttachDetachInput *input;
+
+        input = nas_attach_detach_input_create ();
+
+        if (!input) {
+            operation_shutdown (FALSE);
+            return;
+        }
+
+        g_debug ("Asynchronously message ID 0x0023...");
+        qmi_client_nas_attach_detach (ctx->client,
+                              input,
+                              10,
+                              ctx->cancellable,
+                              (GAsyncReadyCallback)nas_attach_detach_ready,
+                              NULL);
+        qmi_message_nas_attach_detach_input_unref (input);
+        return;
+    }
 
     /* Just client allocate/release? */
     if (noop_flag) {
