@@ -712,7 +712,7 @@ nas_attach_detach_input_create (void)
     input = qmi_message_nas_attach_detach_input_new ();
     if (!qmi_message_nas_attach_detach_input_set_action  (
             input,
-            0x01,
+            0x04,
             &error)) {
         g_printerr ("error: couldn't create input data bundle: '%s'\n",
                     error->message);
